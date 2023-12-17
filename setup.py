@@ -1,17 +1,17 @@
 from setuptools import find_packages, setup
 
-with open("app/README.md", "r") as f:
+with open("README.md", "r") as f:
     long_description = f.read()
 
 setup(
-    name="idgenerator",
-    version="0.0.1",
+    name="vidgenerator",
+    version="0.0.2",
     description="ID generator",
     package_dir={"": "app"},
     packages=find_packages(where="app"),
     long_description=long_description,
     long_description_content_type="text/markdown",
-    author="thevikash",
+    author="Vikash Singh",
     author_email="thevikash@onmail.com",
     license="MIT",
     classifiers=[
