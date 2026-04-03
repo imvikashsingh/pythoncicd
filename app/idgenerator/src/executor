@@ -1,0 +1,162 @@
+"""Execution loop - runs tasks and manages state"""
+
+from agent.tools import Tools
+from agent.context import ContextManager
+from agent.llm import LLMClient
+
+class Executor:
+    """Executes planned tasks using tools and LLM"""
+    
+    def __init__(self, context_manager: ContextManager):
+        self.tools = Tools()
+        self.context = context_manager
+        self.llm = LLMClient()
+    
+    def execute_plan(self, plan: list) -> list:
+        """
+        Execute all tasks in the plan
+        
+        Returns:
+            List of completed tasks with results
+        """
+        print("\n" + "="*60)
+        print("EXECUTING PLAN")
+        print("="*60)
+        
+        completed_tasks = []
+        
+        for i, task in enumerate(plan, 1):
+            print(f"\n📋 Task {i}/{len(plan)}: {task['description']}")
+            print(f"   Type: {task['type']}")
+            
+            result = self._execute_task(task)
+            
+            task_result = {
+                "task": task['description'],
+                "type": task['type'],
+                "result": result,
+                "status": "completed"
+            }
+            completed_tasks.append(task_result)
+            
+            # Update context with result
+            self.context.add_task_result(
+                task['description'],
+                result,
+                task['type']
+            )
+            
+            # Show result preview
+            preview = result[:200] + "..." if len(result) > 200 else result
+            print(f"   ✓ Result: {preview}")
+        
+        return completed_tasks
+    
+    def _execute_task(self, task: dict) -> str:
+        """Execute a single task based on its type"""
+        
+        if task['type'] == 'search':
+            return self._execute_search(task)
+        elif task['type'] == 'read':
+            return self._execute_read(task)
+        elif task['type'] == 'summarize':
+            return self._execute_summarize(task)
+        elif task['type'] == 'ask_user':
+            return self._execute_ask_user(task)
+        else:
+            return f"Unknown task type: {task['type']}"
+    
+    def _execute_search(self, task: dict) -> str:
+        """Execute a web search task"""
+        query = task.get('query', task['description'])
+        
+        result = self.tools.web_search(query)
+        
+        if result['success']:
+            # If Tavily provided an answer, highlight it
+            if result.get('answer'):
+                return f"🔍 {result['formatted']}\n💡 Tavily Answer: {result['answer']}"
+            return result['formatted']
+        else:
+            return f"Search failed: {result['error']}"
+    
+    def _execute_read(self, task: dict) -> str:
+        """Execute a URL read task"""
+        url = task.get('query', '')
+        
+        if not url.startswith('http'):
+            # Try to find URL in description
+            import re
+            urls = re.findall(r'https?://[^\s]+', task['description'])
+            if urls:
+                url = urls[0]
+            else:
+                return "No valid URL provided for reading"
+        
+        result = self.tools.read_url(url)
+        
+        if result['success']:
+            return f"Content from {url}:\n\n{result['content']}"
+        else:
+            return f"Failed to read URL: {result['error']}"
+    
+    def _execute_summarize(self, task: dict) -> str:
+        """Execute a summarization task using LLM"""
+        context = self.context.get_context_for_summary()
+        query = task.get('query', 'Provide a summary of the findings')
+        
+        prompt = f"""Based on the following research results, provide a clear summary.
+
+Context:
+{context}
+
+Task: {query}
+
+Provide a concise, well-structured answer (2-3 paragraphs)."""
+        
+        response = self.llm.chat(
+            messages=[
+                {"role": "system", "content": "You are a helpful research assistant providing clear summaries."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.5,
+            max_tokens=500
+        )
+        
+        return response
+    
+    def _execute_ask_user(self, task: dict) -> str:
+        """Ask user for clarification"""
+        question = task.get('query', task['description'])
+        print(f"\n❓ Agent needs clarification: {question}")
+        response = input("Your response: ")
+        return f"User said: {response}"
+    
+    def generate_final_output(self, completed_tasks: list) -> str:
+        """Generate final user-friendly output"""
+        context = self.context.get_context_for_summary()
+        
+        prompt = f"""Create a final, user-friendly report answering the original goal.
+
+Original goal: {self.context.user_goal}
+
+Research findings:
+{context}
+
+Provide a clear, organized response with:
+1. Executive summary (1-2 sentences)
+2. Key findings (bullet points)
+3. Actionable recommendations (if applicable)
+
+Keep it concise but informative."""
+        
+        response = self.llm.chat(
+            messages=[
+                {"role": "system", "content": "You create clear, actionable reports from research."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=800
+        )
+        
+        return response
